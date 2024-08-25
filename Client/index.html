@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess-Like Game</title>
+    <style>
+        table {
+            border-collapse: collapse;
+            width: 250px;
+            height: 250px;
+        }
+        td {
+            width: 50px;
+            height: 50px;
+            text-align: center;
+            vertical-align: middle;
+            border: 1px solid rgb(13, 11, 11);
+        }
+        .player-A {
+            background-color: rgb(39, 51, 55);
+            color: white;
+        }
+        .player-B {
+            background-color: rgb(224, 7, 7);
+            color: white;
+        }
+        .valid-move {
+            background-color: rgb(177, 177, 0);
+        }
+    </style>
+</head>
+<body>
+    <h1>Chess-Like Game</h1>
+    <table id="game-board"></table>
+    <div id="move-controls"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+
+        let selectedPiece = null;
+        let currentPlayer = "A";  // Set this based on game initialization
+
+        socket.on('game_state_update', (data) => {
+            updateBoard(data.board);
+        });
+
+        socket.on('invalid_move', (data) => {
+            alert(data.message);
+        });
+
+        function updateBoard(board) {
+            const table = document.getElementById('game-board');
+            table.innerHTML = '';
+            for (let row = 0; row < 5; row++) {
+                let tr = document.createElement('tr');
+                for (let col = 0; col < 5; col++) {
+                    let td = document.createElement('td');
+                    if (board[row][col]) {
+                        td.textContent = board[row][col].name;
+                        td.classList.add(board[row][col].player);
+                        td.onclick = () => handleCellClick(row, col);
+                    }
+                    tr.appendChild(td);
+                }
+                table.appendChild(tr);
+            }
+        }
+
+        function handleCellClick(row, col) {
+            if (selectedPiece) {
+                const moveCommand = `${selectedPiece.name}:${getMoveDirection(selectedPiece.row, selectedPiece.col, row, col)}`;
+                sendMove(moveCommand);
+                selectedPiece = null;
+                return;
+            }
+
+            fetchGameState().then((board) => {
+                const piece = board[row][col];
+                if (piece && piece.player === currentPlayer) {
+                    selectedPiece = { name: piece.name, row: row, col: col };
+                    highlightValidMoves(piece, row, col);
+                }
+            }).catch(console.error);
+        }
+
+        function fetchGameState() {
+            return new Promise((resolve, reject) => {
+                socket.emit('get_game_state');
+                socket.on('game_state_update', (response) => {
+                    if (response) {
+                        resolve(response.board);
+                    } else {
+                        reject('Failed to fetch game state');
+                    }
+                });
+            });
+        }
+
+        function highlightValidMoves(piece, row, col) {
+            const validMoves = getValidMoves(piece, row, col);
+            const table = document.getElementById('game-board');
+            table.querySelectorAll('td').forEach(td => td.classList.remove('valid-move'));
+
+            validMoves.forEach(([r, c]) => {
+                const td = table.rows[r].cells[c];
+                td.classList.add('valid-move');
+                td.onclick = () => handleCellClick(r, c); // Allow selecting valid moves
+            });
+        }
+
+        function getValidMoves(piece, row, col) {
+            const moves = [];
+            const directions = {
+                'P': ['L', 'R', 'F', 'B'],
+                'H1': ['L', 'R', 'F', 'B'],
+                'H2': ['FL', 'FR', 'BL', 'BR']
+            };
+
+            const pieceType = piece.name[0]; // Assuming piece names like P1, H1, etc.
+            const directionSet = directions[pieceType];
+
+            directionSet.forEach(direction => {
+                const newPosition = calculateNewPosition(row, col, direction);
+                if (isWithinBounds(newPosition)) {
+                    moves.push(newPosition);
+                }
+            });
+
+            return moves;
+        }
+
+        function calculateNewPosition(row, col, direction) {
+            switch (direction) {
+                case 'L': return [row, col - 1];
+                case 'R': return [row, col + 1];
+                case 'F': return [row - 1, col];
+                case 'B': return [row + 1, col];
+                case 'FL': return [row - 2, col - 2];
+                case 'FR': return [row - 2, col + 2];
+                case 'BL': return [row + 2, col - 2];
+                case 'BR': return [row + 2, col + 2];
+                default: return [row, col];
+            }
+        }
+
+        function isWithinBounds([row, col]) {
+            return row >= 0 && row < 5 && col >= 0 && col < 5;
+        }
+
+        function getMoveDirection(startRow, startCol, endRow, endCol) {
+            if (startRow === endRow) {
+                return endCol > startCol ? 'R' : 'L';
+            }
+            if (startCol === endCol) {
+                return endRow > startRow ? 'B' : 'F';
+            }
+            if (endRow < startRow && endCol < startCol) {
+                return 'FL';
+            }
+            if (endRow < startRow && endCol > startCol) {
+                return 'FR';
+            }
+            if (endRow > startRow && endCol < startCol) {
+                return 'BL';
+            }
+            if (endRow > startRow && endCol > startCol) {
+                return 'BR';
+            }
+            return '';
+        }
+
+        function sendMove(command) {
+            socket.emit('player_move', { command });
+        }
+    </script>
+</body>
+</html>
